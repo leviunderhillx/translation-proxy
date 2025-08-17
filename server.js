@@ -17,12 +17,12 @@ if (!fs.existsSync(cacheDir)) {
 
 let translator;
 const loadStart = Date.now();
-const estimatedLoadTime = 120000; // 2 minutes in ms; adjust based on testing
+const estimatedLoadTime = 300000; // 5 minutes for larger NLLB; adjust based on testing
 
 (async () => {
     try {
-        // Use smaller model for free tier compatibility (English to French example)
-        translator = await pipeline('translation', 'Xenova/opus-mt-en-fr', { cache_dir: cacheDir });
+        // Switch to NLLB for fast tokenizer support (multilingual)
+        translator = await pipeline('translation', 'Xenova/nllb-200-distilled-600M', { cache_dir: cacheDir });
         console.log('Model loaded successfully');
     } catch (error) {
         console.error('Error loading model:', error);
@@ -70,6 +70,7 @@ app.get('/', (req, res) => {
                 #urlInput {
                     width: 70%;
                     padding: 10px;
+                    padding: 10px;
                     margin-right: 10px;
                 }
                 #langSelect {
@@ -103,8 +104,7 @@ app.get('/', (req, res) => {
             <div id="container">
                 <input id="urlInput" placeholder="Enter purchase link (e.g., https://amazon.com)">
                 <select id="langSelect">
-                    <option value="fr">French</option>
-                    <!-- Add more if using multiple models -->
+                    <option value="fra_Latn">French</option> <!-- NLLB uses codes like fra_Latn; add more e.g., <option value="deu_Latn">German</option> -->
                 </select>
                 <button onclick="loadPage()">Load</button>
                 <iframe id="proxyFrame"></iframe>
@@ -145,10 +145,10 @@ app.get('/', (req, res) => {
 // Proxy route
 app.all('/proxy', async (req, res) => {
     const originalUrl = req.query.url;
-    const targetLang = req.query.lang || 'fr'; // Default to French
+    const targetLang = req.query.lang || 'fra_Latn'; // NLLB code for French
     if (!originalUrl) return res.status(400).send('No URL provided');
 
-    if (!translator) return res.status(503).send('Translator model not loaded yet'); // Changed to 503 for service unavailable
+    if (!translator) return res.status(503).send('Translator model not loaded yet');
 
     try {
         // Fetch original page (handle GET/POST)
@@ -170,7 +170,11 @@ app.all('/proxy', async (req, res) => {
         const $ = cheerio.load(response.data);
         const pageLang = $('html').attr('lang') || 'und';
 
-        if (pageLang !== targetLang) {
+        let sourceLang = pageLang; // Map to NLLB codes if needed (e.g., 'en' -> 'eng_Latn')
+        if (sourceLang === 'en') sourceLang = 'eng_Latn';
+        // Add more mappings as needed for accuracy
+
+        if (pageLang !== targetLang.split('_')[0]) { // Rough check
             // Traverse and translate text nodes
             const textNodes = [];
             $('body').find('*').contents().each(function () {
@@ -180,8 +184,7 @@ app.all('/proxy', async (req, res) => {
             });
 
             for (const node of textNodes) {
-                // For OPUS-MT, no src/tgt codes needed; it assumes en-to-fr
-                const translated = await translator(node.data);
+                const translated = await translator(node.data, { src_lang: sourceLang, tgt_lang: targetLang });
                 node.data = translated[0].translation_text;
             }
         }

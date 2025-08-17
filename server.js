@@ -40,7 +40,12 @@ app.get('/status', (req, res) => {
     res.json({ ready, remaining: Math.round(remaining) });
 });
 
-// Serve frontend with improved styling and polling
+// Ping endpoint to keep server awake
+app.get('/ping', (req, res) => {
+    res.send('OK');
+});
+
+// Serve frontend with improved styling, polling, and keep-awake button
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -70,7 +75,6 @@ app.get('/', (req, res) => {
                 #urlInput {
                     width: 70%;
                     padding: 10px;
-                    padding: 10px;
                     margin-right: 10px;
                 }
                 #langSelect {
@@ -97,10 +101,26 @@ app.get('/', (req, res) => {
                     font-size: 14px;
                     color: #333;
                 }
+                #keepAwake {
+                    position: absolute;
+                    top: 10px;
+                    right: 10px;
+                    padding: 8px 16px;
+                    background: #007bff;
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-size: 14px;
+                }
+                #keepAwake:hover {
+                    background: #0056b3;
+                }
             </style>
         </head>
         <body>
             <div id="status">Checking model status...</div>
+            <button id="keepAwake" onclick="keepAwake()">Keep Awake</button>
             <div id="container">
                 <input id="urlInput" placeholder="Enter purchase link (e.g., https://amazon.com)">
                 <select id="langSelect">
@@ -116,6 +136,10 @@ app.get('/', (req, res) => {
                     if (url) {
                         document.getElementById('proxyFrame').src = '/proxy?url=' + encodeURIComponent(url) + '&lang=' + lang;
                     }
+                }
+
+                function keepAwake() {
+                    fetch('/ping').catch(() => {}); // Does nothing visible, but pings server
                 }
 
                 // Polling for model status

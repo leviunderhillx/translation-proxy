@@ -16,6 +16,9 @@ if (!fs.existsSync(cacheDir)) {
 }
 
 let translator;
+const loadStart = Date.now();
+const estimatedLoadTime = 120000; // 2 minutes in ms; adjust based on testing
+
 (async () => {
     try {
         // Use smaller model for free tier compatibility (English to French example)
@@ -29,20 +32,83 @@ let translator;
 app.use(express.urlencoded({ extended: true })); // For POST forms
 app.use(express.json());
 
-// Serve frontend (updated select to match model: only French for now)
+// Status endpoint for polling
+app.get('/status', (req, res) => {
+    const ready = !!translator;
+    const elapsed = Date.now() - loadStart;
+    const remaining = Math.max(0, estimatedLoadTime - elapsed) / 1000; // in seconds
+    res.json({ ready, remaining: Math.round(remaining) });
+});
+
+// Serve frontend with improved styling and polling
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html lang="en">
-        <head><title>Translation Proxy</title></head>
+        <head>
+            <title>Translation Proxy</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    margin: 0;
+                    background-color: #f0f0f0;
+                    position: relative;
+                }
+                #container {
+                    text-align: center;
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                    width: 80%;
+                    max-width: 600px;
+                }
+                #urlInput {
+                    width: 70%;
+                    padding: 10px;
+                    margin-right: 10px;
+                }
+                #langSelect {
+                    padding: 10px;
+                    margin-right: 10px;
+                }
+                button {
+                    padding: 10px 20px;
+                }
+                #proxyFrame {
+                    width: 100%;
+                    height: 80vh;
+                    border: none;
+                    margin-top: 20px;
+                }
+                #status {
+                    position: absolute;
+                    top: 10px;
+                    left: 10px;
+                    background: #fff;
+                    padding: 10px;
+                    border-radius: 5px;
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                    font-size: 14px;
+                    color: #333;
+                }
+            </style>
+        </head>
         <body>
-            <input id="urlInput" placeholder="Enter purchase link" style="width: 80%;">
-            <select id="langSelect">
-                <option value="fr">French</option>
-                <!-- Add more if using multiple models -->
-            </select>
-            <button onclick="loadPage()">Load</button>
-            <iframe id="proxyFrame" style="width:100%; height:80vh; border:none;"></iframe>
+            <div id="status">Checking model status...</div>
+            <div id="container">
+                <input id="urlInput" placeholder="Enter purchase link (e.g., https://amazon.com)">
+                <select id="langSelect">
+                    <option value="fr">French</option>
+                    <!-- Add more if using multiple models -->
+                </select>
+                <button onclick="loadPage()">Load</button>
+                <iframe id="proxyFrame"></iframe>
+            </div>
             <script>
                 function loadPage() {
                     const url = document.getElementById('urlInput').value;
@@ -51,6 +117,25 @@ app.get('/', (req, res) => {
                         document.getElementById('proxyFrame').src = '/proxy?url=' + encodeURIComponent(url) + '&lang=' + lang;
                     }
                 }
+
+                // Polling for model status
+                function updateStatus() {
+                    fetch('/status')
+                        .then(response => response.json())
+                        .then(data => {
+                            const statusDiv = document.getElementById('status');
+                            if (data.ready) {
+                                statusDiv.textContent = 'Model ready!';
+                            } else {
+                                statusDiv.textContent = 'Loading model... (~' + data.remaining + ' seconds left)';
+                            }
+                        })
+                        .catch(error => {
+                            document.getElementById('status').textContent = 'Status check failed';
+                        });
+                }
+                setInterval(updateStatus, 5000); // Poll every 5 seconds
+                updateStatus(); // Initial check
             </script>
         </body>
         </html>
@@ -63,7 +148,7 @@ app.all('/proxy', async (req, res) => {
     const targetLang = req.query.lang || 'fr'; // Default to French
     if (!originalUrl) return res.status(400).send('No URL provided');
 
-    if (!translator) return res.status(500).send('Translator model not loaded yet');
+    if (!translator) return res.status(503).send('Translator model not loaded yet'); // Changed to 503 for service unavailable
 
     try {
         // Fetch original page (handle GET/POST)

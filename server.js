@@ -8,7 +8,7 @@ const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3000;
-const cacheDir = process.env.CACHE_DIR || './.cache'; // Use env var for Render disk
+const cacheDir = process.env.CACHE_DIR || './.cache'; // Use env var for potential future persistence
 
 // Ensure cache dir exists
 if (!fs.existsSync(cacheDir)) {
@@ -17,14 +17,19 @@ if (!fs.existsSync(cacheDir)) {
 
 let translator;
 (async () => {
-    translator = await pipeline('translation', 'Xenova/nllb-200-distilled-600M', { cache_dir: cacheDir });
-    console.log('Model loaded');
+    try {
+        // Use smaller model for free tier compatibility (English to French example)
+        translator = await pipeline('translation', 'Xenova/opus-mt-en-fr', { cache_dir: cacheDir });
+        console.log('Model loaded successfully');
+    } catch (error) {
+        console.error('Error loading model:', error);
+    }
 })();
 
 app.use(express.urlencoded({ extended: true })); // For POST forms
 app.use(express.json());
 
-// Serve frontend
+// Serve frontend (updated select to match model: only French for now)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -33,9 +38,8 @@ app.get('/', (req, res) => {
         <body>
             <input id="urlInput" placeholder="Enter purchase link" style="width: 80%;">
             <select id="langSelect">
-                <option value="en">English</option>
                 <option value="fr">French</option>
-                <!-- Add more languages -->
+                <!-- Add more if using multiple models -->
             </select>
             <button onclick="loadPage()">Load</button>
             <iframe id="proxyFrame" style="width:100%; height:80vh; border:none;"></iframe>
@@ -56,8 +60,10 @@ app.get('/', (req, res) => {
 // Proxy route
 app.all('/proxy', async (req, res) => {
     const originalUrl = req.query.url;
-    const targetLang = req.query.lang || 'en';
+    const targetLang = req.query.lang || 'fr'; // Default to French
     if (!originalUrl) return res.status(400).send('No URL provided');
+
+    if (!translator) return res.status(500).send('Translator model not loaded yet');
 
     try {
         // Fetch original page (handle GET/POST)
@@ -89,7 +95,8 @@ app.all('/proxy', async (req, res) => {
             });
 
             for (const node of textNodes) {
-                const translated = await translator(node.data, { tgt_lang: targetLang, src_lang: pageLang });
+                // For OPUS-MT, no src/tgt codes needed; it assumes en-to-fr
+                const translated = await translator(node.data);
                 node.data = translated[0].translation_text;
             }
         }
